@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clock">
+<meta name="theme-color" content="#0d1117">
+<title>Analog Clock</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --face: #161b22;
+    --rim: #30363d;
+    --tick: #8b949e;
+    --tick-major: #e6edf3;
+    --numeral: #e6edf3;
+    --hour: #e6edf3;
+    --minute: #e6edf3;
+    --second: #ff6b5d;
+    --pin: #ff6b5d;
+    --ui: #8b949e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--numeral);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: background 0.4s ease;
+  }
+
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3vmin;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  svg#clock {
+    width: min(92vw, 92vh, 720px);
+    height: min(92vw, 92vh, 720px);
+    display: block;
+    cursor: pointer;
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  /* tap feedback: a quick squish-and-back so the tap feels answered */
+  svg#clock.tapped { transform: scale(0.94); }
+
+  /* animate the palette change; transform is excluded on purpose, the hands
+     are rotated every frame from JS and must never be transitioned */
+  #clock circle, #clock line, #clock text {
+    transition: fill 0.35s ease, stroke 0.35s ease;
+  }
+
+  .hand { transform-origin: 200px 200px; }
+
+  #digital {
+    font-size: clamp(18px, 5vmin, 42px);
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+    color: var(--numeral);
+    opacity: 0.85;
+  }
+  #digital.hidden { display: none; }
+
+  #controls {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom) + 14px);
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+  #controls.show { opacity: 1; pointer-events: auto; }
+
+  #controls button {
+    appearance: none;
+    border: 1px solid var(--rim);
+    background: var(--face);
+    color: var(--ui);
+    font: inherit;
+    font-size: 13px;
+    padding: 9px 15px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  #controls button:active { transform: scale(0.95); }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <svg id="clock" viewBox="0 0 400 400" aria-label="Analog clock">
+    <circle cx="200" cy="200" r="196" fill="var(--face)" stroke="var(--rim)" stroke-width="6"/>
+    <g id="ticks"></g>
+    <g id="numerals"></g>
+
+    <!-- hour hand -->
+    <g class="hand" id="hourHand">
+      <line x1="200" y1="215" x2="200" y2="110"
+            stroke="var(--hour)" stroke-width="12" stroke-linecap="round"/>
+    </g>
+
+    <!-- minute hand -->
+    <g class="hand" id="minuteHand">
+      <line x1="200" y1="220" x2="200" y2="60"
+            stroke="var(--minute)" stroke-width="8" stroke-linecap="round"/>
+    </g>
+
+    <!-- second hand -->
+    <g class="hand" id="secondHand">
+      <line x1="200" y1="238" x2="200" y2="48"
+            stroke="var(--second)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="200" cy="238" r="7" fill="var(--second)"/>
+    </g>
+
+    <circle cx="200" cy="200" r="8" fill="var(--pin)"/>
+    <circle cx="200" cy="200" r="3.5" fill="var(--face)"/>
+  </svg>
+
+  <div id="digital">--:--:--</div>
+</div>
+
+<div id="controls">
+  <button id="btnTheme">Colors</button>
+  <button id="btnSweep">Ticking</button>
+  <button id="btnDigital">Hide digits</button>
+</div>
+
+<script>
+(function () {
+  var SVG = 'http://www.w3.org/2000/svg';
+  var ticks = document.getElementById('ticks');
+  var numerals = document.getElementById('numerals');
+
+  // --- build the face -------------------------------------------------
+  for (var i = 0; i < 60; i++) {
+    var major = i % 5 === 0;
+    var angle = (i * 6 - 90) * Math.PI / 180;
+    var outer = 182;
+    var inner = major ? 164 : 174;
+    var line = document.createElementNS(SVG, 'line');
+    line.setAttribute('x1', 200 + Math.cos(angle) * inner);
+    line.setAttribute('y1', 200 + Math.sin(angle) * inner);
+    line.setAttribute('x2', 200 + Math.cos(angle) * outer);
+    line.setAttribute('y2', 200 + Math.sin(angle) * outer);
+    line.setAttribute('stroke', major ? 'var(--tick-major)' : 'var(--tick)');
+    line.setAttribute('stroke-width', major ? 5 : 2);
+    line.setAttribute('stroke-linecap', 'round');
+    ticks.appendChild(line);
+  }
+
+  for (var h = 1; h <= 12; h++) {
+    var a = (h * 30 - 90) * Math.PI / 180;
+    var t = document.createElementNS(SVG, 'text');
+    t.setAttribute('x', 200 + Math.cos(a) * 133);
+    t.setAttribute('y', 200 + Math.sin(a) * 133);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'central');
+    t.setAttribute('font-size', '38');
+    t.setAttribute('font-weight', '500');
+    t.setAttribute('fill', 'var(--numeral)');
+    t.textContent = h;
+    numerals.appendChild(t);
+  }
+
+  // --- animation ------------------------------------------------------
+  var hourHand = document.getElementById('hourHand');
+  var minuteHand = document.getElementById('minuteHand');
+  var secondHand = document.getElementById('secondHand');
+  var digital = document.getElementById('digital');
+
+  var sweep = false; // false = classic tick-tick, true = smooth sweep
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function frame() {
+    var now = new Date();
+    var ms = now.getMilliseconds();
+    var s = now.getSeconds() + (sweep ? ms / 1000 : 0);
+    var m = now.getMinutes() + s / 60;
+    var h = now.getHours() % 12 + m / 60;
+
+    hourHand.style.transform   = 'rotate(' + (h * 30) + 'deg)';
+    minuteHand.style.transform = 'rotate(' + (m * 6) + 'deg)';
+    secondHand.style.transform = 'rotate(' + (s * 6) + 'deg)';
+
+    var hr = now.getHours() % 12 || 12;
+    digital.textContent = hr + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // --- controls -------------------------------------------------------
+  var controls = document.getElementById('controls');
+  var btnTheme = document.getElementById('btnTheme');
+  var btnSweep = document.getElementById('btnSweep');
+  var btnDigital = document.getElementById('btnDigital');
+  var hideTimer;
+
+  function showControls() {
+    controls.classList.add('show');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      controls.classList.remove('show');
+    }, 4000);
+  }
+  document.addEventListener('pointerdown', showControls);
+  showControls();
+
+  function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  // --- color palettes: tap the clock to cycle -------------------------
+  // Each entry maps straight onto the CSS custom properties in :root.
+  var THEMES = [
+    { name: 'Midnight',  bg: '#0d1117', face: '#161b22', rim: '#30363d', tick: '#8b949e', tickMajor: '#e6edf3', ink: '#e6edf3', second: '#ff6b5d' },
+    { name: 'Paper',     bg: '#f2efe9', face: '#fffdf8', rim: '#d9d2c5', tick: '#a9a093', tickMajor: '#2f2a24', ink: '#2f2a24', second: '#c8452f' },
+    { name: 'Bubblegum', bg: '#ffd9ec', face: '#fff5fa', rim: '#ff9ecb', tick: '#e87bb0', tickMajor: '#a4276b', ink: '#a4276b', second: '#7b3fe4' },
+    { name: 'Ocean',     bg: '#062a3d', face: '#0b3e57', rim: '#1a6d92', tick: '#5fb3d4', tickMajor: '#d8f3ff', ink: '#d8f3ff', second: '#ffd166' },
+    { name: 'Lime',      bg: '#123d1f', face: '#1b5c2e', rim: '#2e8b4a', tick: '#79c98d', tickMajor: '#eaffef', ink: '#eaffef', second: '#ffe14d' },
+    { name: 'Sunset',    bg: '#3d1338', face: '#5c1f4f', rim: '#95357f', tick: '#d986c4', tickMajor: '#ffe9fa', ink: '#ffe9fa', second: '#ff9e4d' },
+    { name: 'Creamsicle',bg: '#ff8c42', face: '#fff3e2', rim: '#e0662a', tick: '#f0a068', tickMajor: '#7a3410', ink: '#7a3410', second: '#1b7f8c' },
+    { name: 'Grape',     bg: '#2b1b52', face: '#3d2775', rim: '#6244b8', tick: '#a48ce0', tickMajor: '#f0eaff', ink: '#f0eaff', second: '#5cf2c4' }
+  ];
+  var themeIndex = 0;
+
+  function applyTheme(i) {
+    themeIndex = ((i % THEMES.length) + THEMES.length) % THEMES.length;
+    var t = THEMES[themeIndex];
+    var r = document.documentElement.style;
+    r.setProperty('--bg', t.bg);
+    r.setProperty('--face', t.face);
+    r.setProperty('--rim', t.rim);
+    r.setProperty('--tick', t.tick);
+    r.setProperty('--tick-major', t.tickMajor);
+    r.setProperty('--numeral', t.ink);
+    r.setProperty('--hour', t.ink);
+    r.setProperty('--minute', t.ink);
+    r.setProperty('--second', t.second);
+    r.setProperty('--pin', t.second);
+    r.setProperty('--ui', t.tick);
+    document.querySelector('meta[name=theme-color]').setAttribute('content', t.bg);
+    save('theme', String(themeIndex));
+  }
+
+  function nextTheme() { applyTheme(themeIndex + 1); }
+  function setSweep(on) {
+    sweep = on;
+    btnSweep.textContent = on ? 'Sweeping' : 'Ticking';
+    save('sweep', on ? '1' : '0');
+  }
+  function setDigital(on) {
+    digital.classList.toggle('hidden', !on);
+    btnDigital.textContent = on ? 'Hide digits' : 'Show digits';
+    save('digital', on ? '1' : '0');
+  }
+
+  btnTheme.addEventListener('click', nextTheme);
+  btnSweep.addEventListener('click', function () { setSweep(!sweep); });
+  btnDigital.addEventListener('click', function () {
+    setDigital(digital.classList.contains('hidden'));
+  });
+
+  // Tap the clock face itself to change color. This is the main event as far
+  // as a toddler is concerned, so it gets a squish animation for feedback and
+  // does NOT pop the control bar up over the clock.
+  var clockSvg = document.getElementById('clock');
+  clockSvg.addEventListener('pointerdown', function (e) {
+    e.stopPropagation();
+    nextTheme();
+    clockSvg.classList.add('tapped');
+    setTimeout(function () { clockSvg.classList.remove('tapped'); }, 180);
+  });
+
+  applyTheme(parseInt(load('theme'), 10) || 0);
+  setSweep(load('sweep') === '1');
+  setDigital(load('digital') !== '0');
+
+  // --- keep the screen awake while the clock is up --------------------
+  var wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    } catch (e) {}
+  }
+  requestWakeLock();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') requestWakeLock();
+  });
+})();
+</script>
+</body>
+</html>
